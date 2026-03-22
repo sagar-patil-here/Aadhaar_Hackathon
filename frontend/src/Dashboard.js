@@ -9,6 +9,13 @@ import India from "@svg-maps/india";
 
 const API_BASE_URL = 'http://localhost:8000';
 
+const ZONE_LABELS = { 3: 'CRITICAL', 2: 'HIGH', 1: 'MODERATE', 0: 'SAFE' };
+const ZONE_BADGE = {
+  3: 'bg-red-500/20 text-red-400 border border-red-500/30',
+  2: 'bg-orange-500/20 text-orange-400 border border-orange-500/30',
+  1: 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',
+};
+
 const normalizeStateName = (name) => {
   if (!name) return "";
   return name.toLowerCase().replace(/[^a-z0-9]/g, '').replace("state", "").trim();
@@ -192,32 +199,36 @@ const Dashboard = () => {
       list.forEach(item => {
         const key = normalizeStateName(item.state || item.State);
         if (!key) return;
-        if (!risks[key]) risks[key] = { level: 0, types: [], count: 0, originalName: item.state || item.State };
+        if (!risks[key]) risks[key] = { level: 0, types: [], count: 0, hasCritical: false, originalName: item.state || item.State };
         risks[key].count += 1;
-        risks[key].level = item.risk_level === 'CRITICAL' ? 2 : Math.max(risks[key].level, 1);
+        if (item.risk_level === 'CRITICAL') risks[key].hasCritical = true;
         if (!risks[key].types.includes(type)) risks[key].types.push(type);
       });
     };
     process(analysisResults.shield1_results, 'Infiltration');
     process(analysisResults.shield2_results, 'Laundering');
     process(analysisResults.shield3_results, 'Ghost Children');
+
+    Object.values(risks).forEach(r => {
+      if (r.hasCritical || r.count >= 5) r.level = 3;
+      else if (r.count >= 3)             r.level = 2;
+      else if (r.count >= 1)             r.level = 1;
+    });
     return risks;
   }, [analysisResults]);
 
   const highlightedStatesList = useMemo(() => {
     if (!mapRiskData || Object.keys(mapRiskData).length === 0) return [];
     return Object.entries(mapRiskData)
-      .map(([key, data]) => ({
-        name: data.originalName || key,
-        count: data.count,
-        level: data.level === 2 ? 'CRITICAL' : 'HIGH',
-        types: data.types.join(', ')
+      .filter(([, d]) => d.count > 0)
+      .map(([key, d]) => ({
+        name: d.originalName || key,
+        count: d.count,
+        level: d.level,
+        label: ZONE_LABELS[d.level] || 'SAFE',
+        types: d.types.join(', ')
       }))
-      .sort((a, b) => {
-        if (a.level === 'CRITICAL' && b.level !== 'CRITICAL') return -1;
-        if (a.level !== 'CRITICAL' && b.level === 'CRITICAL') return 1;
-        return b.count - a.count;
-      });
+      .sort((a, b) => b.level - a.level || b.count - a.count);
   }, [mapRiskData]);
 
   const StatCard = ({ title, value, subtext, color, icon }) => (
@@ -378,37 +389,41 @@ const Dashboard = () => {
             <div className="lg:col-span-2 dashboard-card flex flex-col">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="dashboard-card-title">Geospatial Risk Analysis</h3>
-                <div className="flex space-x-2 text-[10px]">
-                  <span className="flex items-center"><span className="w-2 h-2 rounded-full bg-red-500 mr-1"></span>Critical</span>
-                  <span className="flex items-center"><span className="w-2 h-2 rounded-full bg-orange-500 mr-1"></span>High</span>
+                <div className="flex space-x-3 text-[10px]">
+                  <span className="flex items-center"><span className="w-2.5 h-2.5 rounded-sm mr-1" style={{background:'#f87171'}}></span>Critical</span>
+                  <span className="flex items-center"><span className="w-2.5 h-2.5 rounded-sm mr-1" style={{background:'#fb923c'}}></span>High</span>
+                  <span className="flex items-center"><span className="w-2.5 h-2.5 rounded-sm mr-1" style={{background:'#fde047'}}></span>Moderate</span>
+                  <span className="flex items-center"><span className="w-2.5 h-2.5 rounded-sm mr-1" style={{background:'#86efac'}}></span>Safe</span>
                 </div>
               </div>
-              <div className="flex-1 w-full h-[400px] relative mb-4">
+              <div className="flex-1 w-full h-[400px] relative rounded-lg overflow-hidden bg-[#0f172a]">
                 <SVGMap
                   map={India}
                   className="w-full h-full"
                   locationClassName={(location) => {
                     const nm = normalizeStateName(location.name);
                     const risk = mapRiskData[nm];
-                    if (!risk || risk.count === 0) return "map-state map-state-low";
-                    if (risk.level === 2) return "map-state map-state-critical";
-                    return "map-state map-state-high";
+                    const base = "svg-map__location";
+                    if (!risk || risk.count === 0) return `${base} map-zone-safe`;
+                    if (risk.level >= 3) return `${base} map-zone-red`;
+                    if (risk.level === 2) return `${base} map-zone-orange`;
+                    return `${base} map-zone-yellow`;
                   }}
                   onLocationMouseOver={(e) => {
                     const name = e.target.getAttribute("name");
                     const nm = normalizeStateName(name);
                     const risk = mapRiskData[nm];
                     if (risk && risk.count > 0) {
-                      setTooltipContent(`${name}: ${risk.count} Threat${risk.count > 1 ? 's' : ''} (${risk.types.join(', ')})`);
+                      setTooltipContent(`${name}: ${risk.count} threat${risk.count > 1 ? 's' : ''} (${risk.types.join(', ')})`);
                     } else {
-                      setTooltipContent(name);
+                      setTooltipContent(`${name}: Safe`);
                     }
                   }}
                   onLocationMouseOut={() => setTooltipContent("")}
                 />
                 {tooltipContent && (
-                  <div className="absolute bottom-4 right-4 bg-gray-900/95 border border-gray-600 px-3 py-2 rounded-lg text-xs text-white shadow-xl backdrop-blur-sm pointer-events-none z-10">
-                    <div className="font-semibold">{tooltipContent}</div>
+                  <div className="absolute bottom-3 right-3 bg-gray-900/95 border border-gray-600 px-3 py-1.5 rounded text-xs text-white shadow-md pointer-events-none z-10 font-medium">
+                    {tooltipContent}
                   </div>
                 )}
               </div>
@@ -421,20 +436,14 @@ const Dashboard = () => {
                       <div
                         key={idx}
                         className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 ${
-                          state.level === 'CRITICAL'
-                            ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                            : 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                          ZONE_BADGE[state.level] || 'bg-green-500/20 text-green-400 border border-green-500/30'
                         }`}
                       >
                         <span className="font-bold">{state.name}</span>
                         <span className="text-gray-500">&bull;</span>
                         <span>{state.count} threat{state.count > 1 ? 's' : ''}</span>
-                        {state.level === 'CRITICAL' && (
-                          <>
-                            <span className="text-gray-500">&bull;</span>
-                            <span className="text-red-500 font-bold">CRITICAL</span>
-                          </>
-                        )}
+                        <span className="text-gray-500">&bull;</span>
+                        <span className="font-bold">{state.label}</span>
                       </div>
                     ))}
                   </div>
