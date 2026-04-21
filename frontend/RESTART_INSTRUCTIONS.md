@@ -8,7 +8,7 @@ Press `Ctrl+C` in the terminal where `npm start` is running.
 
 ## Start again
 
-```bash
+```bash6
 cd frontend
 npm start
 ```
@@ -21,4 +21,4 @@ backend :
 
 cd /Users/sagarpatil/Work/Projects/Web/Aadhaar_DRISHTI/backend
 source venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 800066
